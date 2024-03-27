@@ -16,28 +16,31 @@ def siren_init(module:nn.Module):
             w.uniform_(-bound, bound)
 
 class coordx_net(nn.Module):
-    def __init__(self, channels:int, hidden_size:int=256, initialize:bool=True):
+    def __init__(self, n_branches:int, out_channels:int, hidden_size:int, initialize:bool=True):
         '''
         CoordX network as described in the paper: https://arxiv.org/pdf/2201.12425.pdf
-        @param channels: number of channels in the output image (3 for RGB, 1 for grayscale)
-        @param hidden_size: hidden size of the network (default 256)
+        @param branches: number of branches in the network (2 for image, 3 for video)
+        @param out_channels: number of output channels (3 for RGB, 1 for grayscale)
+        @param hidden_size: hidden size of the network (256 for image, 1024 for video)
         @param intialize: whether to initialize the network with Siren initialization
                             - not included in the paper but recommended
-
-        To make a prediction, pass the x and y coordinates as two separate inputs
         '''
         super(coordx_net, self).__init__()
-        self.channels=channels
-        self.x_first = torch.nn.Linear(1,hidden_size)
-        self.y_first = torch.nn.Linear(1,hidden_size)
-        self.premerge_parallels = nn.Sequential(
+        self.n_branches = n_branches
+        self.channels = out_channels
+        # the input branches
+        self.branches = nn.ModuleList()
+        for _ in range(n_branches):
+            self.branches.append(nn.Linear(1,hidden_size))
+        # the shared hidden layers (premerge)
+        self.premerge = nn.Sequential(
             Sine(w0=1.0),
             nn.Linear(hidden_size,hidden_size),
             Sine(w0=1.0),
             nn.Linear(hidden_size,hidden_size),
             Sine(w0=1.0)
         )
-        
+        # the shared hidden layers (postmerge)
         self.postmerge = torch.nn.Sequential(
             nn.Linear(hidden_size,hidden_size),
             Sine(w0=1.0),
@@ -46,23 +49,47 @@ class coordx_net(nn.Module):
         )
     
         if initialize:
-            siren_init(self.x_first)
-            siren_init(self.y_first)
-            for module in self.premerge_parallels.modules():
+            for module in self.branches.modules():
+                siren_init(module)            
+            for module in self.premerge.modules():
                 siren_init(module)
             for module in self.postmerge.modules():
                 siren_init(module)
     
-    def merge(self, x:torch.tensor, y:torch.tensor):
-        return torch.einsum("ik,jk->ijk",x,y)
+    def merge(self, dims:list[torch.tensor]) -> torch.tensor:
+        '''
+        implementation of the fusion operator in the paper
+        @param dims: the input tensors --> [x,y] for image; [x,y,t] for video
+        '''        
+        if self.n_branches == 2:            
+            return torch.einsum("ik,jk->ijk",dims[0],dims[1])
+        elif self.n_branches == 3:
+            return torch.einsum("ih,jh,kh->ijkh",dims[0],dims[1],dims[2])
+    
+    def reshape(self, tensor:torch.tensor) -> torch.tensor:
+        '''
+        reshape the tensor to be in the correct format for viewing
+        @param tensor: the input tensor
+        '''
+        if self.n_branches == 2:
+            # reshape to (C, H, W)
+            return tensor.permute(2,1,0)
+        elif self.n_branches == 3:
+            # reshape to (T, H, W, C)
+            return tensor.permute(2,1,0,3)            
 
-    def forward(self, x:torch.tensor, y:torch.tensor):
-        x1 = self.x_first(x)
-        y1 = self.y_first(y)
-        x2 = self.premerge_parallels(x1)
-        y2 = self.premerge_parallels(y1)
-        merged = self.merge(x2,y2)
-        res = self.postmerge(merged)
-        # reshape to (channels, H, W)
-        res = res.permute(2,1,0)
+    def forward(self, dims:list[torch.tensor]) -> torch.tensor:
+        '''
+        Pass the tensors containing each dimensions coordinates as separate inputs
+        @param dims: the input tensors containing the coordinates
+           - convention: [x,y] for image; [x,y,t] for video
+        '''        
+        outputs = []
+        for i, dim in enumerate(dims):            
+            out = self.branches[i](dim)
+            out = self.premerge(out)
+            outputs.append(out)            
+        merged = self.merge(outputs)        
+        res = self.postmerge(merged)        
+        res = self.reshape(res)      
         return res
