@@ -75,6 +75,10 @@ class coordx_net(nn.Module):
                 dims[1] = torch.einsum("ijk->ik", dims[1])
             return torch.einsum("ik,jk->ijk", dims[0], dims[1])
         elif self.n_branches == 3:
+            if self.R > 1:
+                dims[0] = torch.einsum("ijk->ik", dims[0])
+                dims[1] = torch.einsum("ijk->ik", dims[1])
+                dims[2] = torch.einsum("ijk->ik", dims[2])
             return torch.einsum("ih,jh,kh->ijkh", dims[0], dims[1], dims[2])
     
     def reshape(self, tensor:torch.tensor) -> torch.tensor:
