@@ -20,17 +20,18 @@ def positional_encoding(tensor:torch.tensor, max_n:int) -> torch.tensor:
     '''
     positional encoding from CoordX paper. It uses the encoding as defined by NERF but additonaly concatenates the original input
     formula: PE(p) = [sin(2^0 * pi * p), cos(2^0 * pi * p), sin(2^1 * pi * p), cos(2^1 * pi * p), ..., sin(2^L * pi * p), cos(2^L * pi * p)]
-        - L is the encoding frequency, it is not specified in the CoordX paper but mentioned to be 10 in the NERF paper
+        - L is the encoding frequency, it is not specified in the CoordX paper but mentioned to be 10 in the NERF paper: https://arxiv.org/pdf/2003.08934.pdf 
     @param tensor: the input tensor
     @param max_n: the maximum value that can appear in the input tensor (needs to be supplied since we are sampling from a distribution and not a fixed range)
     @output: tensor of shape (N, 2*L + 1), where N is the number of samples, L is the encoding frequency (10)
     '''    
     # normalize to [-1, 1]
+    L = 10
     nvals = torch.clone(tensor)    
     nvals = 2 * ((nvals - 1) / (max_n - 1)) - 1 # 1 is the min
     # apply the positional encoding to the input tensor
-    out = nvals.repeat(1, 20)
-    for i in range(10):
+    out = nvals.repeat(1, 2*L)
+    for i in range(L):
         out[:,2*i] = torch.sin(math.pow(2,i) * math.pi * out[:,2*i])
         out[:,2*i+1] = torch.cos(math.pow(2,i) * math.pi * out[:,2*i+1])
     # concatenate this encoding with the original input
@@ -126,14 +127,14 @@ class coordx_net(nn.Module):
             # reshape to (T, H, W, C)
             return tensor.permute(2,1,0,3)
     
-    def map_to_h(self, x:torch.tensor) -> torch.tensor:
+    def map_to_h(self, tensor:torch.tensor) -> torch.tensor:
         '''
         reshapes the input tensor so that its dimensionality is in line with the postmerge hidden layers
         @param x: the input tensor (probably the output of the final premerge layer)
         '''
         if self.R > 1:
-            return torch.reshape(x, (x.shape[0], self.R, int(x.shape[1]/self.R)))
-        return x
+            return torch.reshape(tensor, (tensor.shape[0], self.R, int(tensor.shape[1]/self.R)))
+        return tensor
 
     def forward(self, dims:list[torch.tensor]) -> torch.tensor:
         '''
