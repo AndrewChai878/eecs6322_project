@@ -25,13 +25,21 @@ def train(model, optimizer:torch.optim, dims:list[torch.tensor], target:torch.te
     @param n_epochs: number of epochs to train for (20k for image, 100k for video)
     @param print_step: the step to print the loss
     '''
+    target = target.to(device)
     loss_fn = torch.nn.MSELoss()
+    torch.backends.cudnn.benchmark = False
+    scaler = torch.cuda.amp.GradScaler()
     for epoch in range(n_epochs+1):
-        optimizer.zero_grad()
-        out = model(dims)        
-        loss = loss_fn(out, target)
+        # the recommended way to clear gradient with autocast
+        for param in model.parameters():
+            param.grad = None
+        with torch.cuda.amp.autocast():        
+            out = model(dims)        
+            loss = loss_fn(out, target)
         loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         if epoch % print_step == 0:
             print(f'Iteration: {epoch} | Loss: {loss.item()}')
 
@@ -59,6 +67,9 @@ def accelerated_train(model, optimizer:torch.optim, dims:list[torch.Tensor], tar
         t_dist = torch.ones(dims[2].shape[0], device=device)/dims[2].shape[0]        
     
     loss_fn = torch.nn.MSELoss()
+    torch.backends.cudnn.benchmark = False
+    scaler = torch.cuda.amp.GradScaler()
+
     for epoch in range(n_epochs+1):
         # Sampling 
         # add a bit of noise 
@@ -82,13 +93,16 @@ def accelerated_train(model, optimizer:torch.optim, dims:list[torch.Tensor], tar
             sampled_target = target.index_select(1, y_samples).index_select(2, x_samples)
 
         # Training     
-        optimizer.zero_grad()
-        if len(dims) == 3:
-            out = model([dims[0].index_select(0, x_samples), dims[1].index_select(0, y_samples), dims[2].index_select(0, t_samples)])
-        else:
-            out = model([dims[0].index_select(0, x_samples), dims[1].index_select(0, y_samples)])     
-        loss = loss_fn(out, sampled_target)
-        loss.backward()
-        optimizer.step()
+        for param in model.parameters():
+            param.grad = None
+        with torch.cuda.amp.autocast():            
+            if len(dims) == 3:
+                out = model([dims[0].index_select(0, x_samples), dims[1].index_select(0, y_samples), dims[2].index_select(0, t_samples)])
+            else:
+                out = model([dims[0].index_select(0, x_samples), dims[1].index_select(0, y_samples)])
+            loss = loss_fn(out, sampled_target)        
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
         if epoch % print_step == 0:
             print(f'Iteration: {epoch} | Loss: {loss.item()}')
