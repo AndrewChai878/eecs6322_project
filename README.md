@@ -18,6 +18,8 @@ You will want to have the following additional packages:
 To run the code you only need to access `coordx.py` for the reproduced model and `helpers.py` for the training function with accelerated sampling.
 
 The `example.ipynb` notebook contains a walkthrough of how to train CoordX to represent images and videos. The other notebooks in this repository are there to show our work over time.
+* the image training tests were conducted in `sampling_test.ipynb`
+* the image inference tests were conducted in `inference_test.ipynb`
 
 The original paper uses 12 random images from the DIV2K dataset to evaluate image representation. We inlcude the 12 DIV2K images we randomly sampled and used for our evaluation in the images folder. Images used in our report and analyis are available in the output_images folder. 
 
